@@ -20,3 +20,5 @@ Thumbs.db
 # Electron user data (per-user runtime data)
 /logs/
 /temp/
+
+npm-cache/*

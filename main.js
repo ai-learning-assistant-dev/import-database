@@ -200,9 +200,10 @@ ipcMain.handle('fetch-video-titles', async (_event, urls) => {
 				timeout: 12000
 			});
 			const $d = cheerio.load(desktopRes.data);
-			const titleAttr = $d('h1[data-title]').attr('data-title');
+			const titleAttr = $d('title').attr('data-title');
 			const plainH1 = $d('h1').first().text().trim();
-			const title = (titleAttr && titleAttr.trim()) || plainH1 || '';
+			const htmlTitle = $d('title').first().text().trim().replaceAll('_哔哩哔哩_bilibili','');
+			const title = htmlTitle || (titleAttr && titleAttr.trim()) || plainH1 || '';
 
 			let imageSrc = '';
 			// 1. 优先 meta og:image / twitter:image 等静态封面
@@ -628,7 +629,7 @@ ipcMain.handle('import-sections', async (_event, payload) => {
 			const key = chapterId + '||' + sectionTitle;
 			if (existingKey.has(key)) { skipped++; continue; }
 			const scrapedTitle = (row['title'] || row.title || '').trim() || sectionTitle;
-			const baseCandidates = [scrapedTitle, sectionTitle];
+			const baseCandidates = [scrapedTitle];
 			let srtFileRel = null; // 记录找到的字幕文件（相对素材目录名）
 			let summaryJson = null, subtitlesJson = null, markdownContent = null, questionsList = [];
 			let exercisesJson = null; // _exercises.json 解析结果
