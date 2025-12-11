@@ -551,6 +551,7 @@ ipcMain.handle('clear-sections', async () => {
 ipcMain.handle('import-sections', async (_event, payload) => {
 	const courseId = payload && typeof payload.courseId === 'string' ? payload.courseId.trim() : '';
 	const rows = Array.isArray(payload && payload.rows) ? payload.rows : [];
+	console.debug('rows[0]', rows[0]);
 	const folderPath = payload && typeof payload.folderPath === 'string' ? payload.folderPath.trim() : '';
 	if (!courseId) return { ok: false, error: '缺少 courseId' };
 	if (!rows.length) return { ok: false, error: 'Excel 行为空' };
@@ -629,8 +630,8 @@ ipcMain.handle('import-sections', async (_event, payload) => {
 			if (!chapterId) { missingFiles.push({ sectionTitle, reason:'章未找到:'+chapterTitle }); skipped++; continue; }
 			const key = chapterId + '||' + sectionTitle;
 			if (existingKey.has(key)) { skipped++; continue; }
-			const scrapedTitle = (row['title'] || row.title || '').trim() || sectionTitle;
-			const baseCandidates = [scrapedTitle];
+			const progrmaTitle = (row['机械标题'] || row.title || '').trim() || sectionTitle;
+			const baseCandidates = [progrmaTitle];
 			let srtFileRel = null; // 记录找到的字幕文件（相对素材目录名）
 			let summaryJson = null, subtitlesJson = null, markdownContent = null, questionsList = [];
 			let exercisesJson = null; // _exercises.json 解析结果

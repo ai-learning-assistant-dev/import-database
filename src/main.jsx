@@ -145,8 +145,9 @@ function App() {
     { title: '章顺序', dataIndex: '章顺序', render: (v,record) => v || <Tag color="orange">(空)</Tag> },
     { title: '节标题', dataIndex: '节标题', render: (v,record) => v || <Tag color="orange">(空)</Tag> },
     { title: '节顺序', dataIndex: '节顺序', render: (v,record) => v || <Tag color="orange">(空)</Tag> },
+    { title: '机械标题', dataIndex: '机械标题', render: (v,record) => v || <Tag color="orange">(空)</Tag> }, 
     { title: '节图片', dataIndex: 'imageSrc', render: (v,record) => v ? <Typography.Text copyable={{text:v}} ellipsis={{tooltip:v}} style={{maxWidth:260,display:'inline-block'}}>{v}</Typography.Text> : '-' },
-    { title: '抓取标题', dataIndex: 'title', width: 240, render: (_v, record) => {
+    { title: '网页标题', dataIndex: 'title', width: 240, render: (_v, record) => {
         if (record.error) {
           return <Tooltip title={record.error}><Tag color="red">抓取失败</Tag></Tooltip>;
         }
