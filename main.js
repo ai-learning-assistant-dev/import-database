@@ -105,11 +105,12 @@ ipcMain.handle('parse-excel', async (_event, filePath) => {
 		const sheet = workbook.Sheets["chapters_sections"];
 		// header:1 得到二维数组, 每行是一个数组, 便于在没有标题行时处理
 		const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+		// console.debug('rows',rows)
 		if (!rows.length) return { ok: true, list: [] };
 		console.log(`[parse-excel] rows count: ${rows.length}`);
 		const firstRow = rows[0].map(v => String(v).trim());
 		// 统一用小写关键字匹配，以避免大小写不一致导致未识别
-		const headerKeywordsUrl = ['url','链接','link','地址'];
+		const headerKeywordsUrl = ['url','链接','link','地址', '视频url'];
 		const headerKeywordsName = ['name','title','视频名称','名称'];
 		const lowerFirst = firstRow.map(v => v.toLowerCase());
 		let urlCol = -1;
@@ -694,9 +695,12 @@ ipcMain.handle('import-sections', async (_event, payload) => {
 			if (!videoUrl) videoUrl = null;
 			const strPath = (row['imageSrc'] || '').trim() || null;
 			let estimatedTime = null;
-			const durationSecFromExcel = parseDuration(row['时长']);
+			// const durationSecFromExcel = parseDuration(row['时长']);
+			const durationSecFromExcel = parseDuration(row['课时/min']);
+			estimatedTime = durationSecFromExcel;
 			if (Number.isFinite(durationSecFromExcel) && durationSecFromExcel > 0) {
-				estimatedTime = Math.ceil(durationSecFromExcel / 60);
+				// estimatedTime = Math.ceil(durationSecFromExcel / 60);
+				estimatedTime = durationSecFromExcel;
 			}
 			// 解析 _video_info.json 优先覆盖  estimatedTime
 			let foundVideoInfo = false;
