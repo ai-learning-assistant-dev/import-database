@@ -283,6 +283,126 @@ function App() {
     }
   };
 
+  const importSectionsConfirm = () => {
+    Modal.confirm({
+      title: '确认导入视频和习题？',
+      content: (
+        <div>
+          <Typography.Title level={4} style={{ marginTop: 0 }}>
+            课程：{selectedCourse?.name || '未命名课程'}
+          </Typography.Title>
+          <Typography.Paragraph>
+            将根据当前 Excel 列表和素材文件夹导入章节与对应的节/习题，确认继续？
+          </Typography.Paragraph>
+        </div>
+      ),
+      okText: '开始导入',
+      cancelText: '取消',
+      async onOk() {
+        // 构建章节列表
+        const map = new Map();
+        const chapters = [];
+        for (const row of videoList) {
+          const rawTitle = (row['章标题'] || '').trim();
+          if (!rawTitle) continue;
+          if (map.has(rawTitle)) continue; // 去重同一 Excel 中重复
+          map.set(rawTitle, true);
+          const orderRaw = row['章顺序'];
+          let orderNum = parseInt(orderRaw, 10);
+          if (!Number.isFinite(orderNum)) orderNum = chapters.length + 1;
+          chapters.push({ title: rawTitle, chapter_order: orderNum });
+        }
+        if (!chapters.length) {
+          message.warning('没有可导入的章节');
+          return;
+        }
+
+        const hideChapters = message.loading('正在导入章节...', 0);
+        try {
+          const resChapters = await window.bridge.importChapters(selectedCourseId, chapters);
+          hideChapters();
+          if (resChapters.ok) {
+            if (resChapters.inserted > 0) {
+              message.success(`章节导入完成，新增 ${resChapters.inserted} 条，跳过 ${resChapters.skipped} 条，继续导入节...`);
+            } else {
+              message.info('无新增章节，可能都已存在或为空，继续导入节...');
+            }
+          } else {
+            message.error('章节导入失败: ' + resChapters.error);
+            return; // 章节失败就不继续导入节
+          }
+        } catch (e) {
+          hideChapters();
+          message.error('章节导入异常: ' + e.message);
+          return;
+        }
+
+        const hideSections = message.loading('正在导入节 (sections)...', 0);
+        try {
+          const resSections = await window.bridge.importSections(selectedCourseId, videoList, sectionsFolder);
+          hideSections();
+          if (resSections.ok) {
+            setImportDetails(Array.isArray(resSections.details) ? resSections.details : []);
+            setImportMissing(Array.isArray(resSections.missingFiles) ? resSections.missingFiles : []);
+            setImportStats({ inserted: resSections.inserted, skipped: resSections.skipped });
+            const missCount = Array.isArray(resSections.missingFiles) ? resSections.missingFiles.length : 0;
+            message.success(`节导入完成 新增 ${resSections.inserted} 条, 跳过 ${resSections.skipped} 条, 文件缺失或错误 ${missCount} 条`);
+            if (missCount) {
+              console.warn('missingFiles', resSections.missingFiles);
+            }
+          } else {
+            setImportDetails([]);
+            setImportMissing([]);
+            setImportStats(null);
+            message.error('节导入失败: ' + resSections.error);
+          }
+        } catch (e) {
+          hideSections();
+          setImportDetails([]);
+          setImportMissing([]);
+          setImportStats(null);
+          message.error('节导入异常: ' + e.message);
+        }
+      }
+    });
+
+  }
+
+  const clearSectionsConfirm = () => {
+    Modal.confirm({
+      title: '确认重新导入该课程？',
+      content: (
+        <div>
+          <Typography.Title level={4} style={{ marginTop: 0 }}>
+            将清除当前课程的所有章节、节和习题数据
+          </Typography.Title>
+          <Typography.Paragraph>
+            课程：{selectedCourse.name}（ID: {selectedCourse.course_id}）
+          </Typography.Paragraph>
+          <Typography.Paragraph type="danger">
+            操作会删除该课程下的 chapters、sections、leading_question、exercises、exercise_options 中的相关记录，且不可恢复，确认继续？
+          </Typography.Paragraph>
+        </div>
+      ),
+      okText: '确认清除',
+      cancelText: '取消',
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        try {
+          const res = await window.bridge.clearCourseData(selectedCourseId);
+          if (res.ok) {
+            message.success(`已清除课程【${selectedCourse.name}】下的所有章节和习题数据`);
+          } else {
+            message.error('清除失败: ' + res.error);
+          }
+        } catch (e) {
+          message.error('清除异常: ' + e.message);
+        }
+      }
+    });
+  }
+  
+
   return (
     <>
     <Layout style={{minHeight:'100vh'}}>
@@ -427,123 +547,31 @@ function App() {
                   if (!selectedCourseId) { message.warning('请先选择课程'); return; }
                   if (!videoList.length) { message.warning('请先解析 Excel'); return; }
                   if (!sectionsFolder) { message.warning('请选择素材文件夹'); return; }
-
-                  Modal.confirm({
-                    title: '确认导入视频和习题？',
-                    content: (
-                      <div>
-                        <Typography.Title level={4} style={{ marginTop: 0 }}>
-                          课程：{selectedCourse?.name || '未命名课程'}
-                        </Typography.Title>
-                        <Typography.Paragraph>
-                          将根据当前 Excel 列表和素材文件夹导入章节与对应的节/习题，确认继续？
-                        </Typography.Paragraph>
-                      </div>
-                    ),
-                    okText: '开始导入',
-                    cancelText: '取消',
-                    async onOk() {
-                      // 构建章节列表
-                      const map = new Map();
-                      const chapters = [];
-                      for (const row of videoList) {
-                        const rawTitle = (row['章标题'] || '').trim();
-                        if (!rawTitle) continue;
-                        if (map.has(rawTitle)) continue; // 去重同一 Excel 中重复
-                        map.set(rawTitle, true);
-                        const orderRaw = row['章顺序'];
-                        let orderNum = parseInt(orderRaw, 10);
-                        if (!Number.isFinite(orderNum)) orderNum = chapters.length + 1;
-                        chapters.push({ title: rawTitle, chapter_order: orderNum });
-                      }
-                      if (!chapters.length) {
-                        message.warning('没有可导入的章节');
-                        return;
-                      }
-
-                      const hideChapters = message.loading('正在导入章节...', 0);
-                      try {
-                        const resChapters = await window.bridge.importChapters(selectedCourseId, chapters);
-                        hideChapters();
-                        if (resChapters.ok) {
-                          if (resChapters.inserted > 0) {
-                            message.success(`章节导入完成，新增 ${resChapters.inserted} 条，跳过 ${resChapters.skipped} 条，继续导入节...`);
-                          } else {
-                            message.info('无新增章节，可能都已存在或为空，继续导入节...');
-                          }
-                        } else {
-                          message.error('章节导入失败: ' + resChapters.error);
-                          return; // 章节失败就不继续导入节
-                        }
-                      } catch (e) {
-                        hideChapters();
-                        message.error('章节导入异常: ' + e.message);
-                        return;
-                      }
-
-                      const hideSections = message.loading('正在导入节 (sections)...', 0);
-                      try {
-                        const resSections = await window.bridge.importSections(selectedCourseId, videoList, sectionsFolder);
-                        hideSections();
-                        if (resSections.ok) {
-                          setImportDetails(Array.isArray(resSections.details) ? resSections.details : []);
-                          setImportMissing(Array.isArray(resSections.missingFiles) ? resSections.missingFiles : []);
-                          setImportStats({ inserted: resSections.inserted, skipped: resSections.skipped });
-                          const missCount = Array.isArray(resSections.missingFiles) ? resSections.missingFiles.length : 0;
-                          message.success(`节导入完成 新增 ${resSections.inserted} 条, 跳过 ${resSections.skipped} 条, 文件缺失或错误 ${missCount} 条`);
-                          if (missCount) {
-                            console.warn('missingFiles', resSections.missingFiles);
-                          }
-                        } else {
-                          setImportDetails([]);
-                          setImportMissing([]);
-                          setImportStats(null);
-                          message.error('节导入失败: ' + resSections.error);
-                        }
-                      } catch (e) {
-                        hideSections();
-                        setImportDetails([]);
-                        setImportMissing([]);
-                        setImportStats(null);
-                        message.error('节导入异常: ' + e.message);
-                      }
-                    }
-                  });
+                  if ((excelPath.indexOf(selectedCourse?.name) < 0 || sectionsFolder.indexOf(selectedCourse?.name) < 0)) {
+                    Modal.confirm({
+                      title: ' ！！！你可能选错了课程，请仔细检查！！！',
+                      okText: '返回',
+                      cancelText: '我检查无误',
+                      onCancel: importSectionsConfirm
+                    })
+                  } else {
+                    importSectionsConfirm();
+                  }
                 }}
               >导入章节和习题</Button>
               <Button danger onClick={async ()=>{
                 if (!selectedCourseId || !selectedCourse) { message.warning('请先选择课程'); return; }
-                Modal.confirm({
-                  title: '确认重新导入该课程？',
-                  content: (
-                    <div>
-                      <Typography.Title level={4} style={{ marginTop: 0 }}>
-                        将清除当前课程的所有章节、节和习题数据
-                      </Typography.Title>
-                      <Typography.Paragraph>
-                        课程：{selectedCourse.name}（ID: {selectedCourse.course_id}）
-                      </Typography.Paragraph>
-                      <Typography.Paragraph type="danger">
-                        操作会删除该课程下的 chapters、sections、leading_question、exercises、exercise_options 中的相关记录，且不可恢复，确认继续？
-                      </Typography.Paragraph>
-                    </div>
-                  ),
-                  okText: '确认清除',
-                  cancelText: '取消',
-                  okButtonProps: { danger: true },
-                  onOk: async () => {
-                    try {
-                      const res = await window.bridge.clearCourseData(selectedCourseId);
-                      if (res.ok) {
-                        message.success(`已清除课程【${selectedCourse.name}】下的所有章节和习题数据`);
-                      } else {
-                        message.error('清除失败: ' + res.error);
-                      }
-                    } catch (e) {
-                      message.error('清除异常: ' + e.message);
-                    }
-                  }
-                });
+                if ((excelPath.indexOf(selectedCourse?.name) < 0 || sectionsFolder.indexOf(selectedCourse?.name) < 0)) {
+                  Modal.confirm({
+                    title: ' ！！！你可能选错了课程，请仔细检查！！！',
+                    okText: '返回',
+                    cancelText: '我检查无误',
+                    onCancel: clearSectionsConfirm
+                  })
+                } else {
+                  clearSectionsConfirm();
+                }
+                
               }}>重新导入（清除当前课程数据）</Button>
               <Button disabled={!(importDetails.length || importMissing.length)} onClick={()=>setDetailsModalOpen(true)}>查看导入详情</Button>
               <Typography.Text type="secondary">{excelStatus}</Typography.Text>

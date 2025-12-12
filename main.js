@@ -689,6 +689,9 @@ ipcMain.handle('import-sections', async (_event, payload) => {
 					}
 				}
 			}
+			if(!exercisesJson || !Array.isArray(exercisesJson.multiple_choice) && !Array.isArray(exercisesJson.short_answer)){
+				missingFiles.push({ sectionTitle, reason:'解析exercises失败'});
+			}
 			if (!foundSummary) missingFiles.push({ sectionTitle, reason:'summary缺失' });
 			if (!foundSrt) missingFiles.push({ sectionTitle, reason:'srt缺失' });
 			if (!foundMd) missingFiles.push({ sectionTitle, reason:'md缺失' });
