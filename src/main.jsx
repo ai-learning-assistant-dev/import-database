@@ -348,6 +348,34 @@ function App() {
               />
               <Button onClick={()=>queryCourses()} disabled={loadingCourses}>刷新</Button>
               <Button type="dashed" onClick={()=>{ setIsUpdateMode(false); setSelectedCourseId(null); setSelectedCourse(null); setCourseForm({ name:'', icon_url:'', description:'', default_ai_persona_id:'' }); setCourseModalOpen(true); }}>新增课程</Button>
+              <Button danger onClick={async ()=>{
+                if (!selectedCourseId || !selectedCourse) { message.warning('请先选择课程'); return; }
+                Modal.confirm({
+                  title: '确认删除该课程？',
+                  content: (
+                    <div>
+                      删除后会导致学生的学习记录丢失
+                    </div>
+                  ),
+                  okText: '确认删除',
+                  cancelText: '取消',
+                  okButtonProps: { danger: true },
+                  onOk: async () => {
+                    try {
+                      const res = await window.bridge.removeCourse(selectedCourseId);
+                      if (res.ok) {
+                        message.success(`已删除课程【${selectedCourse.name}】`);
+                        handleSelectCourse(null);
+                        queryCourses();
+                      } else {
+                        message.error('删除失败: ' + res.error);
+                      }
+                    } catch (e) {
+                      message.error('删除异常: ' + e.message);
+                    }
+                  }
+                });
+              }}>删除课程</Button>
             </Space>
             {selectedCourse && (
               <Divider style={{margin:'12px 0'}} />

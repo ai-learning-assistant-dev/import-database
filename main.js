@@ -902,4 +902,78 @@ ipcMain.handle('clear-course-data', async (_event, payload) => {
 	}
 });
 
+// 删除课程
+ipcMain.handle('remove-course', async (_event, payload) => {
+	const rawCourseId = payload && payload.courseId;
+	const courseId = rawCourseId != null ? String(rawCourseId).trim() : '';
+	if (!courseId) return { ok: false, error: '缺少 courseId' };
+	let client;
+	try {
+		const cfgPath = getConfigFilePath();
+		if (!fs.existsSync(cfgPath)) return { ok: false, error: '未配置数据库' };
+		const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
+		client = new Client({
+			host: cfg.host,
+			port: Number(cfg.port) || 5432,
+			user: cfg.user,
+			password: cfg.password,
+			database: cfg.database,
+			connectionTimeoutMillis: 8000
+		});
+		await client.connect();
+		await client.query('BEGIN');
+		// 找出该课程下所有 section_id
+		const secRes = await client.query(
+			`SELECT s.section_id FROM sections s
+			 JOIN chapters c ON s.chapter_id = c.chapter_id
+			 WHERE c.course_id = $1`,
+			[courseId]
+		);
+		const sectionIds = secRes.rows.map(r => r.section_id);
+		let deletedExerciseOptions = 0;
+		let deletedExercises = 0;
+		let deletedLeading = 0;
+		let deletedSections = 0;
+		let deletedChapters = 0;
+		let deletedCourse = 0;
+		if (sectionIds.length) {
+			// 删除练习题选项
+			const exRes = await client.query('SELECT exercise_id FROM exercises WHERE section_id = ANY($1::uuid[])', [sectionIds]);
+			const exerciseIds = exRes.rows.map(r => r.exercise_id);
+			if (exerciseIds.length) {
+				const delOpt = await client.query('DELETE FROM exercise_options WHERE exercise_id = ANY($1::uuid[])', [exerciseIds]);
+				deletedExerciseOptions = delOpt.rowCount || 0;
+			}
+			const delEx = await client.query('DELETE FROM exercises WHERE section_id = ANY($1::uuid[])', [sectionIds]);
+			deletedExercises = delEx.rowCount || 0;
+			const delLead = await client.query('DELETE FROM leading_question WHERE section_id = ANY($1::uuid[])', [sectionIds]);
+			deletedLeading = delLead.rowCount || 0;
+			const delSec = await client.query('DELETE FROM sections WHERE section_id = ANY($1::uuid[])', [sectionIds]);
+			deletedSections = delSec.rowCount || 0;
+		}
+		// 删除该课程的章节
+		const delChap = await client.query('DELETE FROM chapters WHERE course_id = $1', [courseId]);
+		deletedChapters = delChap.rowCount || 0;
+		const delCourse = await client.query('DELETE FROM courses WHERE course_id = $1', [courseId]);
+		deletedCourse = delCourse.rowCount || 0;
+		await client.query('COMMIT');
+		await client.end();
+		return {
+			ok: true,
+			deletedExerciseOptions,
+			deletedExercises,
+			deletedLeading,
+			deletedSections,
+			deletedChapters,
+			deletedCourse
+		};
+	} catch (e) {
+		if (client) {
+			try { await client.query('ROLLBACK'); } catch(_) {}
+			try { await client.end(); } catch(_) {}
+		}
+		return { ok:false, error: e.message };
+	}
+});
+
 // （已替换为上方版本）
