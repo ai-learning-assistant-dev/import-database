@@ -105,11 +105,12 @@ ipcMain.handle('parse-excel', async (_event, filePath) => {
 		const sheet = workbook.Sheets["chapters_sections"];
 		// header:1 得到二维数组, 每行是一个数组, 便于在没有标题行时处理
 		const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+		// console.debug('rows',rows)
 		if (!rows.length) return { ok: true, list: [] };
 		console.log(`[parse-excel] rows count: ${rows.length}`);
 		const firstRow = rows[0].map(v => String(v).trim());
 		// 统一用小写关键字匹配，以避免大小写不一致导致未识别
-		const headerKeywordsUrl = ['url','链接','link','地址'];
+		const headerKeywordsUrl = ['url','链接','link','地址', '视频url'];
 		const headerKeywordsName = ['name','title','视频名称','名称'];
 		const lowerFirst = firstRow.map(v => v.toLowerCase());
 		let urlCol = -1;
@@ -200,9 +201,10 @@ ipcMain.handle('fetch-video-titles', async (_event, urls) => {
 				timeout: 12000
 			});
 			const $d = cheerio.load(desktopRes.data);
-			const titleAttr = $d('h1[data-title]').attr('data-title');
+			const titleAttr = $d('title').attr('data-title');
 			const plainH1 = $d('h1').first().text().trim();
-			const title = (titleAttr && titleAttr.trim()) || plainH1 || '';
+			const htmlTitle = $d('title').first().text().trim().replaceAll('_哔哩哔哩_bilibili','');
+			const title = htmlTitle || (titleAttr && titleAttr.trim()) || plainH1 || '';
 
 			let imageSrc = '';
 			// 1. 优先 meta og:image / twitter:image 等静态封面
@@ -549,6 +551,7 @@ ipcMain.handle('clear-sections', async () => {
 ipcMain.handle('import-sections', async (_event, payload) => {
 	const courseId = payload && typeof payload.courseId === 'string' ? payload.courseId.trim() : '';
 	const rows = Array.isArray(payload && payload.rows) ? payload.rows : [];
+	console.debug('rows[0]', rows[0]);
 	const folderPath = payload && typeof payload.folderPath === 'string' ? payload.folderPath.trim() : '';
 	if (!courseId) return { ok: false, error: '缺少 courseId' };
 	if (!rows.length) return { ok: false, error: 'Excel 行为空' };
@@ -627,8 +630,8 @@ ipcMain.handle('import-sections', async (_event, payload) => {
 			if (!chapterId) { missingFiles.push({ sectionTitle, reason:'章未找到:'+chapterTitle }); skipped++; continue; }
 			const key = chapterId + '||' + sectionTitle;
 			if (existingKey.has(key)) { skipped++; continue; }
-			const scrapedTitle = (row['title'] || row.title || '').trim() || sectionTitle;
-			const baseCandidates = [scrapedTitle, sectionTitle];
+			const progrmaTitle = (row['机械标题'] || row.title || '').trim() || sectionTitle;
+			const baseCandidates = [progrmaTitle];
 			let srtFileRel = null; // 记录找到的字幕文件（相对素材目录名）
 			let summaryJson = null, subtitlesJson = null, markdownContent = null, questionsList = [];
 			let exercisesJson = null; // _exercises.json 解析结果
@@ -686,6 +689,9 @@ ipcMain.handle('import-sections', async (_event, payload) => {
 					}
 				}
 			}
+			if(!exercisesJson || !Array.isArray(exercisesJson.multiple_choice) && !Array.isArray(exercisesJson.short_answer)){
+				missingFiles.push({ sectionTitle, reason:'解析exercises失败'});
+			}
 			if (!foundSummary) missingFiles.push({ sectionTitle, reason:'summary缺失' });
 			if (!foundSrt) missingFiles.push({ sectionTitle, reason:'srt缺失' });
 			if (!foundMd) missingFiles.push({ sectionTitle, reason:'md缺失' });
@@ -693,9 +699,12 @@ ipcMain.handle('import-sections', async (_event, payload) => {
 			if (!videoUrl) videoUrl = null;
 			const strPath = (row['imageSrc'] || '').trim() || null;
 			let estimatedTime = null;
-			const durationSecFromExcel = parseDuration(row['时长']);
+			// const durationSecFromExcel = parseDuration(row['时长']);
+			const durationSecFromExcel = parseDuration(row['课时/min']);
+			estimatedTime = durationSecFromExcel;
 			if (Number.isFinite(durationSecFromExcel) && durationSecFromExcel > 0) {
-				estimatedTime = Math.ceil(durationSecFromExcel / 60);
+				// estimatedTime = Math.ceil(durationSecFromExcel / 60);
+				estimatedTime = durationSecFromExcel;
 			}
 			// 解析 _video_info.json 优先覆盖  estimatedTime
 			let foundVideoInfo = false;
@@ -886,6 +895,80 @@ ipcMain.handle('clear-course-data', async (_event, payload) => {
 			deletedLeading,
 			deletedSections,
 			deletedChapters
+		};
+	} catch (e) {
+		if (client) {
+			try { await client.query('ROLLBACK'); } catch(_) {}
+			try { await client.end(); } catch(_) {}
+		}
+		return { ok:false, error: e.message };
+	}
+});
+
+// 删除课程
+ipcMain.handle('remove-course', async (_event, payload) => {
+	const rawCourseId = payload && payload.courseId;
+	const courseId = rawCourseId != null ? String(rawCourseId).trim() : '';
+	if (!courseId) return { ok: false, error: '缺少 courseId' };
+	let client;
+	try {
+		const cfgPath = getConfigFilePath();
+		if (!fs.existsSync(cfgPath)) return { ok: false, error: '未配置数据库' };
+		const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
+		client = new Client({
+			host: cfg.host,
+			port: Number(cfg.port) || 5432,
+			user: cfg.user,
+			password: cfg.password,
+			database: cfg.database,
+			connectionTimeoutMillis: 8000
+		});
+		await client.connect();
+		await client.query('BEGIN');
+		// 找出该课程下所有 section_id
+		const secRes = await client.query(
+			`SELECT s.section_id FROM sections s
+			 JOIN chapters c ON s.chapter_id = c.chapter_id
+			 WHERE c.course_id = $1`,
+			[courseId]
+		);
+		const sectionIds = secRes.rows.map(r => r.section_id);
+		let deletedExerciseOptions = 0;
+		let deletedExercises = 0;
+		let deletedLeading = 0;
+		let deletedSections = 0;
+		let deletedChapters = 0;
+		let deletedCourse = 0;
+		if (sectionIds.length) {
+			// 删除练习题选项
+			const exRes = await client.query('SELECT exercise_id FROM exercises WHERE section_id = ANY($1::uuid[])', [sectionIds]);
+			const exerciseIds = exRes.rows.map(r => r.exercise_id);
+			if (exerciseIds.length) {
+				const delOpt = await client.query('DELETE FROM exercise_options WHERE exercise_id = ANY($1::uuid[])', [exerciseIds]);
+				deletedExerciseOptions = delOpt.rowCount || 0;
+			}
+			const delEx = await client.query('DELETE FROM exercises WHERE section_id = ANY($1::uuid[])', [sectionIds]);
+			deletedExercises = delEx.rowCount || 0;
+			const delLead = await client.query('DELETE FROM leading_question WHERE section_id = ANY($1::uuid[])', [sectionIds]);
+			deletedLeading = delLead.rowCount || 0;
+			const delSec = await client.query('DELETE FROM sections WHERE section_id = ANY($1::uuid[])', [sectionIds]);
+			deletedSections = delSec.rowCount || 0;
+		}
+		// 删除该课程的章节
+		const delChap = await client.query('DELETE FROM chapters WHERE course_id = $1', [courseId]);
+		deletedChapters = delChap.rowCount || 0;
+		const delCourse = await client.query('DELETE FROM courses WHERE course_id = $1', [courseId]);
+		deletedCourse = delCourse.rowCount || 0;
+		await client.query('COMMIT');
+		await client.end();
+		return {
+			ok: true,
+			deletedExerciseOptions,
+			deletedExercises,
+			deletedLeading,
+			deletedSections,
+			deletedChapters,
+			deletedCourse
 		};
 	} catch (e) {
 		if (client) {

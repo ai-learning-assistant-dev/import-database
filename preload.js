@@ -16,5 +16,6 @@ contextBridge.exposeInMainWorld('bridge', {
   importChapters: (courseId, chapters) => ipcRenderer.invoke('import-chapters', { courseId, chapters }),
   importSections: (courseId, rows, folderPath) => ipcRenderer.invoke('import-sections', { courseId, rows, folderPath }),
   clearCourseData: (courseId) => ipcRenderer.invoke('clear-course-data', { courseId }),
+  removeCourse: (courseId) => ipcRenderer.invoke('remove-course', { courseId }),
   clearSections: () => ipcRenderer.invoke('clear-sections')
 });
